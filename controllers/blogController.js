@@ -1,13 +1,13 @@
 const Yup = require("yup");
-const captchapng = require("captchapng");
 const Blog = require("../models/Blog");
 const { sendEmail } = require("../utils/mailer");
+const { handleResponse } = require("../utils/response");
 
 let CAPTCHA_NUM;
 
-exports.getIndex = async (req, res) => {
+exports.getIndex = async (req, res, next) => {
   const page = +req.query.page || 1;
-  const postPerPage = 5;
+  const postPerPage = +req.query.size || 5;
 
   try {
     const numberOfPosts = await Blog.find({
@@ -21,48 +21,34 @@ exports.getIndex = async (req, res) => {
       .skip((page - 1) * postPerPage)
       .limit(postPerPage);
 
-    // res.render("index", {
-    //     pageTitle: "وبلاگ",
-    //     path: "/",
-    //     posts,
-    //     formatDate,
-    //     truncate,
-    //     currentPage: page,
-    //     nextPage: page + 1,
-    //     previousPage: page - 1,
-    //     hasNextPage: postPerPage * page < numberOfPosts,
-    //     hasPreviousPage: page > 1,
-    //     lastPage: Math.ceil(numberOfPosts / postPerPage),
-    // });
-    //? Smooth Scrolling
+    handleResponse(res, 200, {
+      total: numberOfPosts,
+      page,
+      itemPerPage: postPerPage,
+      data: posts,
+    });
   } catch (err) {
-    console.log(err);
-    res.render("errors/500");
+    next(err);
   }
 };
 
-exports.getSinglePost = async (req, res) => {
+exports.getSinglePost = async (req, res, next) => {
   try {
     const post = await Blog.findOne({ _id: req.params.id }).populate("user");
 
-    if (!post) return res.redirect("errors/404");
-
-    // res.render("post", {
-    //     pageTitle: post.title,
-    //     path: "/post",
-    //     post,
-    //     formatDate,
-    // });
+    if (!post) {
+      const error = new Error("پست مورد نظر یافت نشد");
+      error.statusCode = 404;
+      throw error;
+    }
+    handleResponse(res, 200, post);
   } catch (err) {
-    console.log(err);
-    res.render("errors/500");
+    next(err);
   }
 };
 
-exports.handleContactPage = async (req, res) => {
-  const errorArr = [];
-
-  const { fullname, email, message, captcha } = req.body;
+exports.handleContactPage = async (req, res, next) => {
+  const { fullname, email, message } = req.body;
 
   const schema = Yup.object().shape({
     fullname: Yup.string().required("نام و نام خانوادگی الزامی می باشد"),
@@ -75,59 +61,15 @@ exports.handleContactPage = async (req, res) => {
   try {
     await schema.validate(req.body, { abortEarly: false });
 
-    if (parseInt(captcha) === CAPTCHA_NUM) {
-      sendEmail(
-        email,
-        fullname,
-        "پیام از طرف وبلاگ",
-        `${message} <br/> ایمیل کاربر : ${email}`
-      );
+    sendEmail(
+      email,
+      fullname,
+      "پیام از طرف وبلاگ",
+      `${message} <br/> ایمیل کاربر : ${email}`
+    );
 
-      req.flash("success_msg", "پیام شما با موفقیت ارسال شد");
-
-      return res.render("contact", {
-        pageTitle: "تماس با ما",
-        path: "/contact",
-        message: req.flash("success_msg"),
-        error: req.flash("error"),
-        errors: errorArr,
-      });
-    }
-
-    req.flash("error", "کد امنیتی صحیح نیست");
-
-    res.render("contact", {
-      pageTitle: "تماس با ما",
-      path: "/contact",
-      message: req.flash("success_msg"),
-      error: req.flash("error"),
-      errors: errorArr,
-    });
+    handleResponse(res, 200, "پیام شما با موفقیت ارسال شد");
   } catch (err) {
-    err.inner.forEach((e) => {
-      errorArr.push({
-        name: e.path,
-        message: e.message,
-      });
-    });
-    res.render("contact", {
-      pageTitle: "تماس با ما",
-      path: "/contact",
-      message: req.flash("success_msg"),
-      error: req.flash("error"),
-      errors: errorArr,
-    });
+    next(err);
   }
-};
-
-exports.getCaptcha = (req, res) => {
-  CAPTCHA_NUM = parseInt(Math.random() * 9000 + 1000);
-  const p = new captchapng(80, 30, CAPTCHA_NUM);
-  p.color(0, 0, 0, 0);
-  p.color(80, 80, 80, 255);
-
-  const img = p.getBase64();
-  const imgBase64 = Buffer.from(img, "base64");
-
-  res.send(imgBase64);
 };

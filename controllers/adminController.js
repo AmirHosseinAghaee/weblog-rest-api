@@ -9,9 +9,7 @@ const Blog = require("../models/Blog");
 const { fileFilter } = require("../utils/multer");
 const { handleResponse } = require("../utils/response");
 
-exports.editPost = async (req, res) => {
-  const errorArr = [];
-
+exports.editPost = async (req, res, next) => {
   const thumbnail = req.files ? req.files.thumbnail : {};
   const fileName = `${shortId.generate()}_${thumbnail.name}`;
   const uploadPath = `${appRoot}/public/uploads/thumbnails/${fileName}`;
@@ -30,11 +28,15 @@ exports.editPost = async (req, res) => {
       });
 
     if (!post) {
-      return res.redirect("errors/404");
+      const error = new Error("پستی با این شناسه یافت نشد .");
+      error.statusCode = 404;
+      throw error;
     }
 
-    if (post.user.toString() != req.user._id) {
-      return res.redirect("/dashboard");
+    if (post.user.toString() != req.userId) {
+      const error = new Error("شما مجوز ویرایش این پست را ندارید.");
+      error.statusCode = 401;
+      throw error;
     } else {
       if (thumbnail.name) {
         fs.unlink(
@@ -58,40 +60,32 @@ exports.editPost = async (req, res) => {
       post.thumbnail = thumbnail.name ? fileName : post.thumbnail;
 
       await post.save();
-      return res.redirect("/dashboard");
+      handleResponse(res, 200, post);
     }
   } catch (err) {
-    console.log(err);
-    err.inner.forEach((e) => {
-      errorArr.push({
-        name: e.path,
-        message: e.message,
-      });
-    });
-    res.render("private/editPost", {
-      pageTitle: "بخش مدیریت | ویرایش پست",
-      path: "/dashboard/edit-post",
-      layout: "./layouts/dashLayout",
-      fullname: req.user.fullname,
-      errors: errorArr,
-      post,
-    });
+    next(err);
   }
 };
 
-exports.deletePost = async (req, res) => {
+exports.deletePost = async (req, res, next) => {
   try {
-    const result = await Blog.findByIdAndRemove(req.params.id);
-    console.log(result);
-    res.redirect("/dashboard");
+    const post = await Blog.findByIdAndRemove(req.params.id);
+    const uploadPath = `${appRoot}/public/uploads/thumbnails/${post.thumbnail}`;
+    fs.unlink(uploadPath, async (err) => {
+      if (err) {
+        const error = new Error("خطایی در پاک سازی عکس پست رخ داده است");
+        error.statusCode = 400;
+        throw error;
+      } else {
+        handleResponse(res, 200, post);
+      }
+    });
   } catch (err) {
-    console.log(err);
-    res.render("errors/500");
+    next(err);
   }
 };
 
 exports.createPost = async (req, res, next) => {
-  console.log(req);
   const thumbnail = req.files ? req.files.thumbnail : {};
   const fileName = `${shortId.generate()}_${thumbnail.name}`;
   const uploadPath = `${appRoot}/public/uploads/thumbnails/${fileName}`;
@@ -117,33 +111,45 @@ exports.createPost = async (req, res, next) => {
   }
 };
 
-exports.uploadImage = (req, res) => {
-  const upload = multer({
-    limits: { fileSize: 4000000 },
-    fileFilter: fileFilter,
-  }).single("image");
+exports.uploadImage = (req, res, next) => {
+  try {
+    const upload = multer({
+      limits: { fileSize: 4000000 },
+      fileFilter: fileFilter,
+    }).single("image");
 
-  upload(req, res, async (err) => {
-    if (err) {
-      if (err.code === "LIMIT_FILE_SIZE") {
-        return res
-          .status(400)
-          .send("حجم عکس ارسالی نباید بیشتر از 4 مگابایت باشد");
-      }
-      res.status(400).send(err);
-    } else {
-      if (req.files) {
-        const fileName = `${shortId.generate()}_${req.files.image.name}`;
-        await sharp(req.files.image.data)
-          .jpeg({
-            quality: 60,
-          })
-          .toFile(`./public/uploads/${fileName}`)
-          .catch((err) => console.log(err));
-        res.status(200).send(`http://localhost:3000/uploads/${fileName}`);
+    upload(req, res, async (err) => {
+      if (err) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return handleResponse(
+            res,
+            400,
+            "",
+            "حجم عکس ارسالی نباید بیشتر از 4 مگابایت باشد"
+          );
+        }
+        handleResponse(res, 400, err);
       } else {
-        res.send("جهت آپلود باید عکسی انتخاب کنید");
+        if (req.files) {
+          const fileName = `${shortId.generate()}_${req.files.image.name}`;
+          await sharp(req.files.image.data)
+            .jpeg({
+              quality: 60,
+            })
+            .toFile(`./public/uploads/img/${fileName}`)
+            .catch((err) => console.log(err));
+
+          handleResponse(
+            res,
+            200,
+            `http://localhost:3000/uploads/img/${fileName}`
+          );
+        } else {
+          handleResponse(res, 400, null, "جهت آپلود باید عکسی انتخاب کنید");
+        }
       }
-    }
-  });
+    });
+  } catch (error) {
+    next(error);
+  }
 };

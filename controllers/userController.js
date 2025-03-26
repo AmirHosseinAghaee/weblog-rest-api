@@ -1,4 +1,3 @@
-const passport = require("passport");
 const jwt = require("jsonwebtoken");
 
 const User = require("../models/User");
@@ -25,8 +24,8 @@ exports.handleLogin = async (req, res, next) => {
             email: user.email,
           },
         },
-        process.env.JWT_SECRET ,
-        {expiresIn : 60 },
+        process.env.JWT_SECRET,
+        { expiresIn: 60 }
       );
 
       handleResponse(res, 200, {
@@ -85,96 +84,86 @@ exports.createUser = async (req, res, next) => {
   }
 };
 
-exports.handleForgetPassword = async (req, res) => {
-  const { email } = req.body;
+exports.handleForgetPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
 
-  const user = await User.findOne({ email: email });
+    const user = await User.findOne({ email: email });
 
-  if (!user) {
-    req.flash("error", "کاربری با ایمیل در پایگاه داده ثبت نیست");
+    if (!user) {
+      const error = new Error("کاربری با ایمیل در پایگاه داده ثبت نیست");
+      error.statusCode = 400;
+      throw error;
+    }
 
-    return res.render("forgetPass", {
-      pageTitle: "فراموشی رمز عبور",
-      path: "/login",
-      message: req.flash("success_msg"),
-      error: req.flash("error"),
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "1h",
     });
-  }
+    const resetLink = `http://localhost:3000/users/reset-password/${token}`;
 
-  const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
-    expiresIn: "1h",
-  });
-  const resetLink = `http://localhost:3000/users/reset-password/${token}`;
-
-  sendEmail(
-    user.email,
-    user.fullname,
-    "فراموشی رمز عبور",
-    `
+    sendEmail(
+      user.email,
+      user.fullname,
+      "فراموشی رمز عبور",
+      `
         جهت تغییر رمز عبور فعلی رو لینک زیر کلیک کنید
         <a href="${resetLink}">لینک تغییر رمز عبور</a>
     `
-  );
+    );
 
-  req.flash("success_msg", "ایمیل حاوی لینک با موفقیت ارسال شد");
-
-  res.render("forgetPass", {
-    pageTitle: "فراموشی رمز عبور",
-    path: "/login",
-    message: req.flash("success_msg"),
-    error: req.flash("error"),
-  });
+    handleResponse(res, 200, null, "ایمیل حاوی لینک با موفقیت ارسال شد");
+  } catch (error) {
+    next(error);
+  }
 };
 
-exports.resetPassword = async (req, res) => {
-  const token = req.params.token;
-
-  let decodedToken;
-
+exports.resetPassword = async (req, res, next) => {
   try {
+    const token = req.params.token;
+    let decodedToken;
     decodedToken = jwt.verify(token, process.env.JWT_SECRET);
-    console.log(decodedToken);
-  } catch (err) {
-    console.log(err);
     if (!decodedToken) {
-      return res.redirect("/404");
+      const error = new Error("توکن پیدا نشده");
+      error.statusCode = 404;
+      throw error;
     }
+    handleResponse(res, 200, decodedToken);
+  } catch (err) {
+    next(err);
   }
 
-  res.render("resetPass", {
-    pageTitle: "تغییر پسورد",
-    path: "/login",
-    message: req.flash("success_msg"),
-    error: req.flash("error"),
-    userId: decodedToken.userId,
-  });
+  // res.render("resetPass", {
+  //   pageTitle: "تغییر پسورد",
+  //   path: "/login",
+  //   message: req.flash("success_msg"),
+  //   error: req.flash("error"),
+  //   userId: decodedToken.userId,
+  // });
 };
 
-exports.handleResetPassword = async (req, res) => {
-  const { password, confirmPassword } = req.body;
-  console.log(password, confirmPassword);
+exports.handleResetPassword = async (req, res, next) => {
+  try {
+    const { password, confirmPassword } = req.body;
+    console.log(password, confirmPassword);
 
-  if (password !== confirmPassword) {
-    req.flash("error", "کلمه های عبور یاکسان نیستند");
+    if (password !== confirmPassword) {
+      const error = new Error("کلمه های عبور یاکسان نیستند");
+      error.statusCode = 422;
+      throw error;
+    }
 
-    return res.render("resetPass", {
-      pageTitle: "تغییر پسورد",
-      path: "/login",
-      message: req.flash("success_msg"),
-      error: req.flash("error"),
-      userId: req.params.id,
-    });
+    const user = await User.findOne({ _id: req.params.id });
+
+    if (!user) {
+      const error = new Error("کاربر مورد نظر یافت نشد !");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    user.password = password;
+    await user.save();
+    handleResponse(res, 200, null, "پسورد شما با موفقیت بروزرسانی شد");
+  } catch (error) {
+    next(error);
   }
-
-  const user = await User.findOne({ _id: req.params.id });
-
-  if (!user) {
-    return res.redirect("/404");
-  }
-
-  user.password = password;
-  await user.save();
-
-  req.flash("success_msg", "پسورد شما با موفقیت بروزرسانی شد");
-  res.redirect("/users/login");
 };

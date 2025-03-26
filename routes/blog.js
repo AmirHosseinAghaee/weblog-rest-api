@@ -14,7 +14,7 @@ router.get("/post/:id", blogController.getSinglePost);
 
 //  @desc   Weblog Numric Captcha
 //  @route  GET /captcha.png
-router.get("/captcha.png", blogController.getCaptcha);
+// router.get("/captcha.png", blogController.getCaptcha);
 
 //  @desc   Handle Contact Page
 //  @route  POST /contact
